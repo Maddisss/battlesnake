@@ -40,3 +40,16 @@
    ```
    .venv\Scripts\Activate.ps1
    ```
+
+## Start Battlesnake
+
+1. Run Battlesnake locally
+
+   ```
+   python main.py
+   ```
+
+2. Play a game locally (battlesnake has to be running on port 8000)
+   ```
+   battlesnake play -W 11 -H 11 --name 'Python Starter Project' --url http://localhost:8000 -g solo --browser
+   ```
