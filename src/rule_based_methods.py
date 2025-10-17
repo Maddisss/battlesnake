@@ -64,5 +64,6 @@ def get_safe_moves(game_state: dict) -> list:
         print(f"MOVE {game_state['turn']}: No safe moves detected! Moving down")
         return {"move": "down"}
 
+
     return safe_moves
 
