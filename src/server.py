@@ -6,7 +6,7 @@ from flask import Flask
 from flask import request
 
 
-def run_server(handlers: typing.Dict):
+def run_server(handlers: typing.Dict, port: int = None):
     app = Flask("Battlesnake")
 
     @app.get("/")
@@ -38,7 +38,8 @@ def run_server(handlers: typing.Dict):
         return response
 
     host = "0.0.0.0"
-    port = int(os.environ.get("PORT", "8000"))
+    if port is None:
+        port = int(os.environ.get("PORT", "8000"))
 
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 

@@ -8,7 +8,6 @@ def get_safe_moves(game_state: dict) -> list:
     my_body = game_state["you"]["body"]
     my_head = my_body[0]
     my_neck = my_body[1]
-    print(game_state)
 
     blocked_cells = set()
     next_moves = {
@@ -61,8 +60,8 @@ def get_safe_moves(game_state: dict) -> list:
             safe_moves.append(move)
 
     if len(safe_moves) == 0:
-        print(f"MOVE {game_state['turn']}: No safe moves detected! Moving down")
-        return {"move": "down"}
+        # print(f"MOVE {game_state['turn']}: No safe moves detected! Moving down")
+        return []
 
 
     return safe_moves
