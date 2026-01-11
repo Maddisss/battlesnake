@@ -26,7 +26,6 @@ def end(game_state: typing.Dict):
 
 def move(game_state: typing.Dict) -> typing.Dict:
     obs = game_state_to_obs(game_state, board_size=game_state["board"]["height"])
-    # obs = np.expand_dims(obs, axis=0)
     action, _ = model.predict(obs)
     move_map = {0: "up", 1: "down", 2: "left", 3: "right"}
     chosen_move = move_map[int(action)]

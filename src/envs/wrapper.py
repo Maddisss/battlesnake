@@ -51,3 +51,47 @@ class SafeBattleSnakeEnv(Wrapper):
         if not safe_indices:
             return list(range(4))  # fallback to all actions
         return safe_indices
+
+
+class BattleSnakeStatsWrapper(Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.reset_stats()
+
+    def reset_stats(self):
+        self.steps_survived = 0
+        self.food_eaten = 0
+        self.enemies_killed = 0
+        self.death_cause = None
+
+    def reset(self, **kwargs):
+        self.reset_stats()
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.steps_survived += 1
+
+        # Track food
+        if self.env.snake[0] == self.env.food:
+            self.food_eaten += 1
+
+        # Track enemy kills
+        if not self.env.enemy:
+            self.enemies_killed += 1
+
+        # Track death cause
+        if terminated:
+            head = self.env.snake[0]
+            if head[0] < 0 or head[0] >= self.env.board_size or head[1] < 0 or head[1] >= self.env.board_size:
+                self.death_cause = "wall"
+            elif head in self.env.snake[1:]:
+                self.death_cause = "self"
+            elif self.env.enemy and head == self.env.enemy[0]:
+                self.death_cause = "enemy"
+            elif self.env.health <= 0:
+                self.death_cause = "hunger"
+            else:
+                self.death_cause = "unknown"
+
+        return obs, reward, terminated, truncated, info

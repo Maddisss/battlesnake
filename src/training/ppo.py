@@ -21,6 +21,7 @@ def get_ppo_model(env_factory, n_envs=8):
     )
     return model
 
-def load_ppo_model(path: str):
-    model = PPO.load("ppo_battlesnake_safe")
+def load_ppo_model(path: str, env_fn, n_envs=8):
+    env = make_vec_env(env_fn, n_envs=n_envs)
+    model = PPO.load(path, env=env)
     return model

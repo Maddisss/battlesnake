@@ -73,9 +73,21 @@ class BattleSnakeEnv(gym.Env):
             enemy_eliminated = self._check_enemy_collision()
 
         # Compute reward
-        reward = self.compute_reward(terminated, ate_food, enemy_eliminated,
-                                    self.prev_distance_to_food, self._food_distance(),
-                                    self.health)
+        reward = self.compute_reward(
+            terminated,
+            ate_food,
+            enemy_eliminated,
+            self.prev_distance_to_food,
+            self._food_distance(),
+            {
+                "snake": self.snake,
+                "enemy": self.enemy,
+                "food": self.food,
+                "board_size": self.board_size,
+                "health": self.health,
+                "step": self.steps
+            }
+        )
         self.prev_distance_to_food = self._food_distance()
 
         truncated = self.steps >= self.max_steps
@@ -86,7 +98,17 @@ class BattleSnakeEnv(gym.Env):
     # ------------------------------------------------------------------
     # 🔹 Explicit reward function
     # ------------------------------------------------------------------
-    def compute_reward(self, died, ate_food, killed_enemy, old_dist, new_dist, old_health):
+    def compute_reward(died, ate_food, killed_enemy, old_distance, new_distance, old_health, game_state):
+        """
+        game_state: {
+            "snake": [(r,c), ...],
+            "enemy": [(r,c), ...],
+            "food": (r,c),
+            "board_size": int,
+            "health": int,
+            "step": int
+        }
+        """
         reward = 0.0
         breakdown = {}
 
@@ -220,11 +242,11 @@ class BattleSnakeEnv(gym.Env):
     def _get_obs(self):
         obs = np.zeros((3, self.board_size, self.board_size), dtype=np.uint8)
         for r, c in self.snake[1:]:
-            obs[0, r, c] = 255
+            obs[0, r, c] = 2
         hr, hc = self.snake[0]
-        obs[1, hr, hc] = 255
+        obs[1, hr, hc] = 1
         fr, fc = self.food
-        obs[2, fr, fc] = 255
+        obs[2, fr, fc] = 3
         return obs
 
     def _get_enemy_safe_action(self):
