@@ -1,5 +1,5 @@
 import json
-from src.llm.llm_client import LLMClient
+from battlesnake.src.llm.llm_client import LLMClient
 
 
 def build_prompt(task_desc: str, feedback: str = None):
@@ -33,8 +33,11 @@ def generate_reward_code(task_desc, feedback: str = None):
 def load_reward_function(code: str):
     local_scope = {}
 
+    imports = """from agents.KILabAgentGroup3.AgentWrapper import AgentWrapper\n"""
+    code_with_imports = imports + code
+
     try:
-        exec(code, {}, local_scope)
+        exec(code_with_imports, {}, local_scope)
     except Exception as e:
         raise RuntimeError(f"Reward code failed to compile: {e}")
 

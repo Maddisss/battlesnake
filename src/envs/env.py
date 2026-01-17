@@ -2,7 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import random
-from src.rule_based_methods import get_safe_moves
+from battlesnake.src.rule_based_methods import get_safe_moves
 
 
 class BattleSnakeEnv(gym.Env):

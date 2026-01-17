@@ -1,8 +1,8 @@
-from src.envs.callback import RenderEveryCallback
-from src.envs.env import BattleSnakeEnv
-from src.eureka.train_eureka import eureka_training_loop
-from src.training.ppo import get_ppo_model
-from src.envs.wrapper import SafeBattleSnakeEnv
+from battlesnake.src.envs.callback import RenderEveryCallback
+from battlesnake.src.envs.env import BattleSnakeEnv
+from battlesnake.src.eureka.train_eureka import eureka_training_loop
+from battlesnake.src.training.ppo import get_ppo_model
+from battlesnake.src.envs.wrapper import SafeBattleSnakeEnv
 
 if __name__ == "__main__":
     # Function to create new environments (required by SB3 VecEnv)

@@ -54,32 +54,68 @@ Strategy Basics:
 
 basic_generation_prompt = """
 You are an expert reinforcement learning engineer designing a reward function for a Battlesnake agent.
+Design a dense reward function for a single-agent Battlesnake environment that encourages long-term survival, safe navigation, food acquisition, and winning against one enemy snake.
+
+Episode Terminates When:
+- The agent snake dies (collision with wall, itself, or enemy head/body, or out of health), or
+- The game engine reports termination (only one snake remains).
 
 Environment:
-- Board: 11x11 grid
-- Player controls a snake; one enemy snake on the board
-- Food randomly placed on empty cells
-- Observation: 3-channel grid (snake body, head, food)
-- Actions: 0=up, 1=down, 2=left, 3=right
-- Maximum steps: 300
-- Snake has health, decreasing over time if food not eaten
-- Game ends if snake collides with wall, itself, or enemy head
+- Grid size: board.width × board.height (typically 15×15).
+- One controlled snake ("me") and one enemy snake.
+- Food spawns on empty cells; eating food restores health and increases length.
+- Snake health decreases each step if no food is eaten.
+- On head to head collisions, the longer snake survives; if equal length, both die.
 
 Reward Function:
-- Signature: def compute_reward(died, ate_food, killed_enemy, old_food_distance, new_food_distance, game_state) -> float
-- game_state dictionary contains keys:
+- Signature: def compute_reward(self, agent: AgentWrapper, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> float:
+You may ONLY use the following inputs:
 
-    'snake': [(r,c), ...],
-    'enemy': [(r,c), ...],
-    'food': (r,c),
-    'board_size': int,
-    'health': int,
-    'step': int
-  
-- Use only the provided function arguments and game_state to compute rewards
-- Must return a single scalar reward
-- Keep rewards bounded between -10 and +10 to ensure stable training
-- Do not perform I/O or modify the environment
+Scalars / Flags:
+- terminated : bool          → episode ended this step
+- died : bool                → agent died this step
+- enemy_died : bool          → enemy snake died this step
+- ate_food : bool            → agent ate food this step
+- action_is_safe : bool      → chosen action was among safe moves
+
+Agent State (read-only via agent.agent_context):
+- agent.agent_context.you : Snake
+    - you.body : List[Position]       (body[0] is head)
+    - you.health : int                (0–100)
+    - you.get_length() : int
+    - you.get_head(), you.get_tail() : Position
+    - you.get_current_direction() : Direction
+
+- agent.agent_context.board : BoardState
+    - board.width, board.height : int
+    - board.food : List[Food(Position)]
+    - board.snakes : List[Snake]      (alive snakes only)
+    - board.is_out_of_bounds(Position) : bool
+    - board.is_occupied_by_snake(Position) : bool
+    - board.is_occupied_by_food(Position) : bool
+
+Agent (provides utilities):
+- agent.distance_to_nearest_food() : int
+- agent.distance_to_nearest_enemy_head() : int
+- agent.distance_to_nearest_wall() : int
+- agent.length_advantage() : int          (agent length - enemy length)
+- agent.reachable_free_space() : int (range 0-225)
+
+Position:
+- Position(x, y) with integer coordinates
+- position.x : int
+- position.y : int
+
+Direction(Enum):
+- Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT
+- Direction.opposite() : Direction
+- Direction.board_delta() : Tuple[int, int]  (delta x,y for this direction)
+
+Important Constraints:
+- Do NOT access observations, history, future states, or environment internals.
+- Do NOT mutate any objects or perform I/O.
+- Reward must be a single float bounded approximately in [-10, +10].
+- Computation must be fast (no heavy search or long loops).
 
 {guidance}
 

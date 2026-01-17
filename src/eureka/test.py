@@ -1,8 +1,8 @@
 
 
-from src.eureka.eureka_db import EurekaDB
-from src.eureka.generator import load_reward_function
-from src.eureka.train_eureka import continue_training
+from battlesnake.src.eureka.eureka_db import EurekaDB
+from battlesnake.src.eureka.generator import load_reward_function
+from battlesnake.src.eureka.train_eureka import continue_training
 
 
 db = EurekaDB()

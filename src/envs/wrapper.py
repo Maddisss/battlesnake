@@ -2,8 +2,8 @@ import numpy as np
 import random
 from gymnasium import Wrapper
 
-from src.envs.env import BattleSnakeEnv
-from src.rule_based_methods import get_safe_moves
+from battlesnake.src.envs.env import BattleSnakeEnv
+from battlesnake.src.rule_based_methods import get_safe_moves
 
 
 

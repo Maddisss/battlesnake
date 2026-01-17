@@ -1,25 +1,17 @@
+from agents.KILabAgentGroup3.gym_env.battlesnake_env import BattlesnakeEnv
 
+from agents.KILabAgentGroup3.AgentWrapper import AgentWrapper
+from environment.Battlesnake.model.Direction import Direction
+from environment.battlesnake_environment import BattlesnakeEnvironment
 
-from src.envs.env import BattleSnakeEnv
-
-
-class LLMRewardBattleSnake(BattleSnakeEnv):
-    def __init__(self, reward_fn):
-        super().__init__()
+class LLMRewardBattleSnake(BattlesnakeEnv):
+    def __init__(self, reward_fn, env: BattlesnakeEnvironment, rl_agent_index=-1, render_mode=None):
+        super().__init__(env, rl_agent_index, render_mode)
         self.reward_fn = reward_fn
 
-    def compute_reward(self, died, ate_food, killed_enemy, old_dist, new_dist, old_health):
-        state = {
-            "health": self.health,
-            "snake": self.snake,
-            "food": self.food,
-            "enemy": self.enemy
-        }
-
-        next_state = state.copy()
-        action = None
+    def compute_reward(self, agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False):
 
         try:
-            return float(self.reward_fn(state, action, next_state))
+            return float(self.reward_fn(agent, action, terminated, action_is_safe, ate_food, died, enemy_died))
         except Exception:
-            return -1.0
+            return -20.0
