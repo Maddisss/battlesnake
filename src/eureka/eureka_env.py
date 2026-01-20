@@ -9,9 +9,9 @@ class LLMRewardBattleSnake(BattlesnakeEnv):
         super().__init__(env, rl_agent_index, render_mode)
         self.reward_fn = reward_fn
 
-    def compute_reward(self, agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False):
+    def compute_reward(self, agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> float:
 
         try:
             return float(self.reward_fn(agent, action, terminated, action_is_safe, ate_food, died, enemy_died))
-        except Exception:
+        except Exception as e:
             return -20.0

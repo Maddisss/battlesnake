@@ -1,18 +1,20 @@
 
 
 from collections import deque
+import gc
 import os
+import time
 import numpy as np
 from agents.KILabAgentGroup3.callbacks.StatsCallback import BattlesnakeStatsWriterCallback
 from agents.KILabAgentGroup3.utilities.environment_helper import vanilla_obs_to_readable_string
 from battlesnake.src.envs.env_utilities import create_env
 from battlesnake.src.eureka.eureka_db import EurekaDB
-from battlesnake.src.eureka.generator import generate_reward_code, load_reward_function
+from battlesnake.src.eureka.generator import generate_reward_code, load_reward_function, summarize_episode_stats
 from battlesnake.src.training.ppo import get_ppo_model, load_ppo_model
 from battlesnake.src.eureka.prompts import get_mutation_prompt, get_random_generation_prompt
 
 
-def continue_training(reward_fn, model_path, timesteps, n_eval_episodes=2):
+def continue_training(reward_fn, model_path, timesteps, n_eval_episodes=50):
     flashlight_mode = False
     env = create_env(reward_fn, flashlight_mode)
 
@@ -22,67 +24,87 @@ def continue_training(reward_fn, model_path, timesteps, n_eval_episodes=2):
         model = get_ppo_model(env, flashlight_mode)
 
     stats_callback = BattlesnakeStatsWriterCallback()
+    fitness = None
 
-    # Train for the given timesteps
-    model.learn(total_timesteps=timesteps, callback=stats_callback)
-    model.save(model_path)
+    try:
 
-    # Evaluate
-    episode_stats = []
-    episode_rewards = []
+        # Train for the given timesteps
+        model.learn(total_timesteps=timesteps, callback=stats_callback)
+        model.save(model_path)
 
-    validate_env = env.envs[0].env
+        # Evaluate
+        episode_stats = []
+        episode_rewards = []
 
-    for _ in range(n_eval_episodes):
-        obs, _ = validate_env.reset()
-        done = False
-        total_reward = 0.0
-        food_eaten = 0
-        enemies_killed = 0
-        last_vanilla_obs = deque(maxlen=10)
+        validate_env = create_env(reward_fn, flashlight_mode, evaluation_env=True)
 
-        while not done:
-            action, _ = model.predict(obs)
-            obs, reward, done, trunc, info = validate_env.step(action)
-            total_reward += reward
-            vanilla_obs = info['vanilla_obs']
-            obs_string = vanilla_obs_to_readable_string(vanilla_obs)
-            last_vanilla_obs.append(obs_string)
+        for _ in range(n_eval_episodes):
+            obs, _ = validate_env.reset()
+            done = False
+            total_reward = 0.0
+            food_eaten = 0
+            enemies_killed = 0
+            # last_vanilla_obs = deque(maxlen=10)
 
-            stats = info['stats']
+            while not done:
+                action, _ = model.predict(obs)
+                obs, reward, done, trunc, info = validate_env.step(action)
+                total_reward += reward
+                # vanilla_obs = info['vanilla_obs']
+                # if vanilla_obs:
+                #     obs_string = vanilla_obs_to_readable_string(vanilla_obs)
+                #     last_vanilla_obs.append(obs_string)
 
-            food_eaten += 1 if stats.get("food_eaten", 0) == 1 else 0
-            enemies_killed += 1 if stats.get("enemies_killed", 0) == 1 else 0
-            if done or trunc:
-                episode_rewards.append(total_reward)
-                episode_stats.append({
-                    "steps_survived": validate_env.step_count,
-                    "food_eaten": food_eaten,
-                    "enemies_killed": enemies_killed,
-                    "elimination_cause": stats.get("elimination_cause", "survived"),
-                    "last_steps": list(last_vanilla_obs)
-                })
+                stats = info['stats']
+
+                food_eaten += 1 if stats.get("food_eaten", 0) == 1 else 0
+                enemies_killed += 1 if stats.get("enemies_killed", 0) == 1 else 0
+                if done or trunc:
+                    episode_rewards.append(total_reward)
+                    episode_stats.append({
+                        "steps_survived": validate_env.step_count,
+                        "food_eaten": food_eaten,
+                        "enemies_killed": enemies_killed,
+                        "elimination_cause": stats.get("elimination_cause", "survived"),
+                        # "last_steps": list(last_vanilla_obs)
+                    })
 
 
-    fitness = calculate_fitness(episode_stats, episode_rewards)
+        fitness = calculate_fitness(episode_stats, episode_rewards)
+    finally:
+        if not fitness and not episode_rewards:
+            fitness = -1
+            episode_rewards = []
+            episode_stats =[{}]
+        env.close()
+        if validate_env:
+            validate_env.close()
+            del validate_env
+        model.env.close()
+        del model.env
+        del model, env
+        gc.collect()
+        time.sleep(0.2)
     return fitness, episode_stats, episode_rewards
 
 
-def eureka_training_loop(generations=2, start_population=1):
+def eureka_training_loop(generations=4, start_population=16):
     db = EurekaDB()
     population = start_population
 
-    base_timesteps = 3000
+    base_timesteps = 200000
     timesteps = base_timesteps
     parent_candidates = []
     for generation in range(generations):
+        timesteps = base_timesteps * (2 ** generation)
         candidates = []
         # Population generation
         for i in range(population):
             parent = parent_candidates[i] if parent_candidates else None
 
             if parent:
-                prompt = get_mutation_prompt(generation, generations, parent['code'], parent['episode_stats'], parent['rewards'])
+                episode_stats_str = summarize_episode_stats(parent['episode_stats'])
+                prompt = get_mutation_prompt(generation, generations, parent['code'], episode_stats_str, sum(parent['rewards']) / len(parent['rewards']))
                 code = generate_reward_code(
                     prompt
                 )
@@ -90,7 +112,7 @@ def eureka_training_loop(generations=2, start_population=1):
                 generation_prompt = get_random_generation_prompt()
                 code = generate_reward_code(generation_prompt)
 
-            model_path = f"models/eureka_candidate_g{generation}_{i}.zip"
+            model_path = f"models/eureka_v2_candidate_g{generation}_{i}.zip"
 
             candidates.append({
                 "code": code,
@@ -107,7 +129,7 @@ def eureka_training_loop(generations=2, start_population=1):
             fitness, stats, rewards = continue_training(
                 reward_fn=fn,
                 model_path=candidate["model_path"],
-                timesteps=base_timesteps
+                timesteps=timesteps
             )
 
             candidate["fitness"] = fitness
@@ -132,7 +154,6 @@ def eureka_training_loop(generations=2, start_population=1):
 
         parent_candidates = survivors
         population = len(parent_candidates)
-        timesteps = base_timesteps * (1 + generation)
 
         print(f"Generation {generation} best fitness: {survivors[0]['fitness']:.4f}")
         
@@ -178,7 +199,7 @@ def calculate_fitness(episode_stats, episode_rewards):
     steps = np.array([s['steps_survived'] for s in episode_stats])
     food = np.array([s['food_eaten'] for s in episode_stats])
     kills = np.array([s['enemies_killed'] for s in episode_stats])
-    deaths = np.array([1 if s['elimination_cause'] not in ['survived'] else 0 for s in episode_stats])
+    deaths = np.array([1 if s['elimination_cause'] and s['elimination_cause'] not in ['survived'] else 0 for s in episode_stats])
 
     wins = 0
     bonus = 0
@@ -186,9 +207,9 @@ def calculate_fitness(episode_stats, episode_rewards):
         wins += 1 if deaths[i] == 0 else 0
         # if death but survived more than 300 steps, give bonus:
         #  - 400 -> 0.1, 500 -> 0.2, 600 -> 0.3, >600 capped at 0.3
-        if deaths[i] == 1 and steps[i] >= 300:
-            extra_bonus = (steps[i] - 300) // 100
-            bonus += min(0.1 * extra_bonus, 0.3)
+        if deaths[i] == 1 and steps[i] >= 100:
+            extra_bonus = (steps[i] - 100) // 100
+            bonus += min(0.1 + (0.1 * extra_bonus), 0.3)
         # if killed at least one enemy, give bonus
         if kills[i] >= 1:
             bonus += 0.25
@@ -198,3 +219,5 @@ def calculate_fitness(episode_stats, episode_rewards):
     norm_fitness = wins_norm + bonus_norm
 
     return float(norm_fitness)
+
+
