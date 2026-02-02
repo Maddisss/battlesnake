@@ -9,13 +9,14 @@ from agents.KILabAgentGroup3.callbacks.StatsCallback import BattlesnakeStatsWrit
 from agents.KILabAgentGroup3.utilities.environment_helper import vanilla_obs_to_readable_string
 from battlesnake.src.envs.env_utilities import create_env
 from battlesnake.src.eureka.eureka_db import EurekaDB
-from battlesnake.src.eureka.generator import generate_reward_code, load_reward_function, summarize_episode_stats
+from battlesnake.src.eureka.eureka_reward_callback import EurekaRewardCallback
+from battlesnake.src.eureka.generator import generate_reward_code, load_reward_function, summarize_training_stats
 from battlesnake.src.training.ppo import get_ppo_model, load_ppo_model
 from battlesnake.src.eureka.prompts import get_mutation_prompt, get_random_generation_prompt
 
 
-def continue_training(reward_fn, model_path, timesteps, n_eval_episodes=50):
-    flashlight_mode = False
+def continue_training(reward_fn, model_path, timesteps, generation, n_eval_episodes=50):
+    flashlight_mode = True
     env = create_env(reward_fn, flashlight_mode)
 
     if os.path.exists(model_path):
@@ -24,17 +25,18 @@ def continue_training(reward_fn, model_path, timesteps, n_eval_episodes=50):
         model = get_ppo_model(env, flashlight_mode)
 
     stats_callback = BattlesnakeStatsWriterCallback()
+    eureka_reward_callback = EurekaRewardCallback(eval_every_steps=timesteps/8)
     fitness = None
+    episode_stats = []
+    episode_rewards = []
 
     try:
 
         # Train for the given timesteps
-        model.learn(total_timesteps=timesteps, callback=stats_callback)
+        model.learn(total_timesteps=timesteps+10000, callback=[stats_callback, eureka_reward_callback])
         model.save(model_path)
 
         # Evaluate
-        episode_stats = []
-        episode_rewards = []
 
         validate_env = create_env(reward_fn, flashlight_mode, evaluation_env=True)
 
@@ -76,6 +78,9 @@ def continue_training(reward_fn, model_path, timesteps, n_eval_episodes=50):
             fitness = -1
             episode_rewards = []
             episode_stats =[{}]
+            eureka_stats = []
+        else:
+            eureka_stats = eureka_reward_callback.batch_stats
         env.close()
         if validate_env:
             validate_env.close()
@@ -85,62 +90,88 @@ def continue_training(reward_fn, model_path, timesteps, n_eval_episodes=50):
         del model, env
         gc.collect()
         time.sleep(0.2)
-    return fitness, episode_stats, episode_rewards
+    return fitness, episode_stats, episode_rewards, eureka_stats
 
 
 def eureka_training_loop(generations=4, start_population=16):
     db = EurekaDB()
+    db._ensure_eureka_stats_column()
     population = start_population
 
     base_timesteps = 200000
     timesteps = base_timesteps
     parent_candidates = []
     for generation in range(generations):
-        timesteps = base_timesteps * (2 ** generation)
+        if generation == 0:
+            timesteps = 200000
+        if generation == 1:
+            timesteps = 400000
+        if generation == 2:
+            timesteps = 1200000
+        if generation == 3:
+            timesteps = 4800000
+        # timesteps = base_timesteps * (2 ** generation)
         candidates = []
         # Population generation
         for i in range(population):
             parent = parent_candidates[i] if parent_candidates else None
 
+            # set_http_proxies()
+
             if parent:
-                episode_stats_str = summarize_episode_stats(parent['episode_stats'])
-                prompt = get_mutation_prompt(generation, generations, parent['code'], episode_stats_str, sum(parent['rewards']) / len(parent['rewards']))
+                summary_text, reward_advice = summarize_training_stats(parent['episode_stats'], parent['eureka_stats'])
+                prompt = get_mutation_prompt(generation, generations, parent['code'], summary_text + "\n" + reward_advice, sum(parent['rewards']) / len(parent['rewards']))
                 code = generate_reward_code(
                     prompt
                 )
             else:
                 generation_prompt = get_random_generation_prompt()
                 code = generate_reward_code(generation_prompt)
+                summary_text = ''
+                reward_advice = ''
 
-            model_path = f"models/eureka_v2_candidate_g{generation}_{i}.zip"
+            # unset_http_proxies()
+
+            model_path = f"models/eureka_candidate_g{generation}_{i}.zip"
 
             candidates.append({
                 "code": code,
                 "parent_id": parent['id'] if parent else None,
                 "generation": generation,
                 "model_path": model_path,
-                "timesteps": timesteps
+                "timesteps": timesteps,
+                "summary_text": summary_text,
+                "reward_advice": reward_advice
             })
 
         # Evaluation
         for candidate in candidates:
             fn = load_reward_function(candidate["code"])
-
-            fitness, stats, rewards = continue_training(
-                reward_fn=fn,
-                model_path=candidate["model_path"],
-                timesteps=timesteps
-            )
-
+            if not fn:
+                print("invalid reward function")
+                fitness, stats, rewards, eureka_stats = -1, [], [], {}
+            else:
+                fitness, stats, rewards, eureka_stats = continue_training(
+                    reward_fn=fn,
+                    model_path=candidate["model_path"],
+                    timesteps=timesteps,
+                    generation=generation
+                )
+            print(f"Fitness = {fitness}")
             candidate["fitness"] = fitness
             candidate["rewards"] = rewards
             candidate["episode_stats"] = stats
+            candidate["eureka_stats"] = eureka_stats
             candidate["id"] = db.insert_candidate(
                 generation=candidate["generation"],
                 parent_id=candidate["parent_id"],
                 code=candidate["code"],
                 fitness=fitness,
-                episode_stats=stats
+                rewards=candidate["rewards"],
+                episode_stats=stats,
+                eureka_stats=eureka_stats, 
+                summary_text=candidate["summary_text"],
+                reward_advice=candidate["reward_advice"]
             )
         
         # Selection
@@ -221,3 +252,29 @@ def calculate_fitness(episode_stats, episode_rewards):
     return float(norm_fitness)
 
 
+
+
+def set_http_proxies() -> None:
+    """
+    Set HTTP/HTTPS proxy environment variables for the current process.
+
+    Parameters
+    ----------
+    http_proxy : str | None
+        Proxy URL for HTTP (e.g. "http://proxy:3128")
+    https_proxy : str | None
+        Proxy URL for HTTPS (e.g. "http://proxy:3128")
+    """
+    proxy = "http://web-proxy.rrzn.uni-hannover.de:3128"
+    if proxy is not None:
+        os.environ["http_proxy"] = proxy
+
+    if proxy is not None:
+        os.environ["https_proxy"] = proxy
+
+def unset_http_proxies() -> None:
+    """
+    Remove HTTP/HTTPS proxy environment variables from the current process.
+    """
+    for key in ("http_proxy", "https_proxy"):
+        os.environ.pop(key, None)

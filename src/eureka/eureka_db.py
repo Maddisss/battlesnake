@@ -30,19 +30,34 @@ class EurekaDB:
         """)
         self.conn.commit()
 
+    def _ensure_eureka_stats_column(self):
+        cursor = self.conn.execute("PRAGMA table_info(reward_candidates);")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "summary_text" not in columns:
+            self.conn.execute(
+                "ALTER TABLE reward_candidates ADD COLUMN summary_text TEXT;"
+            )
+            self.conn.execute(
+                "ALTER TABLE reward_candidates ADD COLUMN reward_advice TEXT;"
+            )
+            self.conn.commit()
+
     # ------------------------------
     # Insert new reward candidate
     # ------------------------------
-    def insert_candidate(self, generation, code, parent_id=None, fitness=None, rewards=None, episode_stats=None):
+    def insert_candidate(self, generation, code, parent_id=None, fitness=None, rewards=None, episode_stats=None, eureka_stats=None, summary_text=None, reward_advice=None):
         # Convert episode_stats to JSON string
+        rewards_json  = json.dumps(rewards) if rewards else None
         stats_json = json.dumps(episode_stats) if episode_stats else None
+        eureka_stats_json = json.dumps(eureka_stats) if eureka_stats else None
 
         cur = self.conn.execute(
             """
-            INSERT INTO reward_candidates (generation, parent_id, code, fitness, rewards, episode_stats)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO reward_candidates (generation, parent_id, code, fitness, rewards, episode_stats, eureka_stats, summary_text, reward_advice)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (generation, parent_id, code, fitness, rewards, stats_json)
+            (generation, parent_id, code, fitness, rewards_json, stats_json, eureka_stats_json, summary_text, reward_advice)
         )
         self.conn.commit()
         return cur.lastrowid

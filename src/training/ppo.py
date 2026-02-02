@@ -28,9 +28,11 @@ def get_ppo_model(env, flashlight_mode=False):
     # )
 
     # model = create_ppo_model(env=env, flashlight_mode=flashlight_mode, **ppo_params)
-    model = load_ppo_model("./uebung5-battlesnakebot-m-m/checkpoints/ppo_fully_obs_stage_1_eureka_600000_steps.zip", env=env)
+    model = load_ppo_model("./uebung5-battlesnakebot-m-m/checkpoints/baseline_stage_1_1000000_steps.zip", env=env)
+    model.tensorboard_log = "./runs/eureka_logs_2/"
     return model
 
 def load_ppo_model(path: str, env):
     model = PPO.load(path, env=env)
+    model.tensorboard_log = "./runs/eureka_logs_2/"
     return model

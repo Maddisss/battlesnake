@@ -140,7 +140,8 @@ Strategy Basics:
 
 code_context_prompt = """
 Reward Function:
-- Signature: def compute_reward(agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> float:
+- Signature: 
+def compute_reward(agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> tuple[float, dict]:
 You may ONLY use the following inputs:
 
 Scalars / Flags:
@@ -149,6 +150,10 @@ Scalars / Flags:
 - enemy_died : bool          → enemy snake died this step
 - ate_food : bool            → agent ate food this step
 - action_is_safe : bool      → chosen action was among safe moves
+
+You have to return excatly a Tuple of:
+- a float of the total reward
+- a dict of each individual reward component (variable name as key) with its respective reward contributed to the total reward (reward value as value) If none set to 0.
 
 Agent State (read-only via agent.agent_context):
 - agent.agent_context.you : Snake
@@ -160,8 +165,9 @@ Agent State (read-only via agent.agent_context):
 
 - agent.agent_context.board : BoardState
     - board.width, board.height : int
+    - board.turn : int (current step number)
     - board.food : List[Food(Position)]
-    - board.snakes : List[Snake]      (alive snakes only)
+    - board.snakes : List[Snake]      (only visible and alive snakes)
     - board.is_out_of_bounds(Position) : bool
     - board.is_occupied_by_snake(Position) : bool
     - board.is_occupied_by_food(Position) : bool
@@ -170,9 +176,20 @@ Agent (provides utilities):
 - agent.distance_to_nearest_food() : int
 - agent.distance_to_nearest_enemy_head() : int
 - agent.distance_to_nearest_wall() : int
-- agent.length_advantage() : int          (agent length - enemy length)
-- agent.reachable_free_space() : int (range 0-225) reachable free space of you snake
-- agent.enemy_reachable_free_space() : int (range 0-225) average reachable free space of the enemies
+- agent.reachable_free_space() : float (range 0-10) openness score of you snake.
+- agent.enemy_reachable_free_space() : float (range 0-10) average openness score of enemies
+- agent.reachable_free_space_from_action(action) : float (range 0-10) (openness score of you snake for current choosen action)
+- agent.get_shortest_path_to_snake_with_smallest_length_advantage(): 
+    tuple[
+        Snake,              the nearest enemy snake instance 
+        int,                the distance of the path to the enemy snake head.
+        list[Direction],    the path to the enemy snake head
+        int                 the length advantage to the enemy snake (my_length - enemy_length)
+    ]
+- agent.length_advantage() : int (negative int for shorter then average, positive for longer)
+
+Storage Buffer for variables needed to store between steps. Will be reset each episode:
+- agent.storage : dict
 
 Position:
 - Position(x, y) with integer coordinates
@@ -194,15 +211,15 @@ Important Constraints:
 
 basic_generation_prompt = """
 You are an expert reinforcement learning engineer designing a reward function for a Battlesnake agent.
-Design a dense reward function for a single-agent Battlesnake environment that encourages long-term survival, safe navigation, food acquisition, and winning against one enemy snake.
+Design a dense reward function for a single-agent Battlesnake environment that encourages long-term survival, safe navigation, food acquisition, and winning against multiple enemy snakes.
 
 Episode Terminates When:
 - The agent snake dies (collision with wall, itself, or enemy head/body, or out of health), or
 - The game engine reports termination (only one snake remains).
 
 Environment:
-- Grid size: board.width × board.height (typically 15×15).
-- One controlled snake ("me") and one enemy snake.
+- Grid size: board.width × board.height (typically 11×11).
+- One controlled snake ("me") and multiple enemy snakes.
 - Food spawns on empty cells; eating food restores health and increases length.
 - Snake health decreases each step if no food is eaten.
 - On head to head collisions, the longer snake survives; if equal length, both die.
@@ -240,9 +257,9 @@ Guidance:
 aggressive_guidance = """
 Guidance:
 - Prioritize killing the enemy whenever possible
-- Reward moving towards the enemy and strategic positioning for attacks
+- Reward moving towards the enemy and strategic positioning for attacks especially when longer then enemy snakes.
 - Penalize dying and collisions, but slightly less than the benefit of successful aggression
-- Reward food collection to maintain health, but combat takes priority
+- Reward food collection to maintain health and to maintain a length, but combat takes priority
 - Penalize self-trapping or poor positioning that reduces combat opportunities
 - Dynamic reward: consider enemy distance, health, and board control
 """

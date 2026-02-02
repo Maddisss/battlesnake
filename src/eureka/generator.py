@@ -1,6 +1,8 @@
 from collections import Counter
 import json
 import random
+
+import numpy as np
 from battlesnake.src.eureka.prompts import get_summarize_last_steps_prompt
 from battlesnake.src.llm.llm_client import LLMClient
 
@@ -47,31 +49,38 @@ def prompt_llm(prompt):
 def load_reward_function(code: str):
     local_scope = {}
 
-    imports = """from agents.KILabAgentGroup3.AgentWrapper import AgentWrapper\nfrom environment.Battlesnake.model.Direction import Direction\n"""
+    imports = """from agents.KILabAgentGroup3.AgentWrapper import AgentWrapper\nfrom environment.Battlesnake.model.Direction import Direction\nfrom environment.Battlesnake.model.Position import Position\n"""
     code_with_imports = imports + code
 
     try:
         exec(code_with_imports, {}, local_scope)
     except Exception as e:
-        raise RuntimeError(f"Reward code failed to compile: {e}")
+        print("reward function generation error: {e}")
+        return None
 
     if "compute_reward" not in local_scope:
-        raise ValueError("No compute_reward function found in LLM output")
+        return None
 
     return local_scope["compute_reward"]
 
 
-def summarize_episode_stats(episode_stats, seed=None):
+def summarize_training_stats(episode_stats, eureka_stats, seed=None):
+    """
+    Summarizes both episode-level and batch-level (Eureka) statistics
+    and generates a concise textual summary plus direct reward recommendations
+    for the LLM.
+    """
     if seed is not None:
         random.seed(seed)
 
+    # -------------------------
+    # Episode-level stats
+    # -------------------------
     n_games = len(episode_stats)
     if n_games == 0:
-        return "No episode statistics available."
+        return "No episode statistics available.", "No reward recommendations available."
 
-    # -------------------------
-    # Aggregate basic counters
-    # -------------------------
+    # Death reasons
     death_reasons = [ep["elimination_cause"] for ep in episode_stats]
     death_reason_counts = Counter(death_reasons)
 
@@ -79,75 +88,65 @@ def summarize_episode_stats(episode_stats, seed=None):
     total_food = sum(ep["food_eaten"] for ep in episode_stats)
     total_enemies = sum(ep["enemies_killed"] for ep in episode_stats)
 
-    # -------------------------
-    # Derived metrics
-    # -------------------------
-    avg_food_per_step = (
-        total_steps / total_food if total_food > 0 else 0.0
-    )
-
-    avg_enemies_killed = total_enemies / n_games
     avg_steps_survived = total_steps / n_games
-
+    avg_enemies_killed = total_enemies / n_games
+    avg_food_per_step = total_steps / total_food if total_food > 0 else 0.0
     wins = sum(1 for ep in episode_stats if ep["elimination_cause"] == "survived")
     win_rate = wins / n_games
 
     # -------------------------
-    # Select example games
+    # Build concise episode summary
     # -------------------------
-    survived_games = [
-        ep for ep in episode_stats if ep["elimination_cause"] == "survived"
+    episode_summary = [
+        f"Total games: {n_games}",
+        f"Win rate: {win_rate:.2%}",
+        f"Average steps survived: {avg_steps_survived:.2f}",
+        f"Average enemies killed per game: {avg_enemies_killed:.2f}",
+        f"Average steps per food: {avg_food_per_step:.4f}",
+        "Death reason counts:"
     ]
-
-    # survived_example = (
-    #     random.choice(survived_games)["last_steps"]
-    #     if survived_games else []
-    # )
-
-    # Find most common elimination cause (excluding survived)
-    elimination_only = [
-        r for r in death_reasons if r != "survived"
-    ]
-
-    # elimination_example = []
-    # if elimination_only:
-    #     most_common_elim, _ = Counter(elimination_only).most_common(1)[0]
-    #     candidate_games = [
-    #         ep for ep in episode_stats
-    #         if ep["elimination_cause"] == most_common_elim
-    #     ]
-    #     elimination_example = random.choice(candidate_games)["last_steps"]
-
-    # -------------------------
-    # Build output string
-    # -------------------------
-    lines = []
-
-    lines.append("Episode Summary")
-    lines.append("-" * 40)
-
-    lines.append("Death reason counts:")
     for reason, count in death_reason_counts.items():
-        lines.append(f"  - {reason}: {count}")
+        episode_summary.append(f"  - {reason}: {count}")
 
-    lines.append("")
-    lines.append(f"Win rate: {win_rate:.2%}")
-    lines.append(f"Average steps survived per game: {avg_steps_survived:.2f}")
-    lines.append(f"Average enemies killed per game: {avg_enemies_killed:.2f}")
-    lines.append(f"Average steps per food: {avg_food_per_step:.4f}")
+    episode_summary_text = "\n".join(episode_summary)
 
+    # -------------------------
+    # Batch-level Eureka stats
+    # -------------------------
+    batch_summary_lines = []
+    for i, batch in enumerate(eureka_stats):
+        batch_summary_lines.append(f"\nBatch {i+1} (Step recorded: approx {batch.get('step_recorded', 0):.0f})")
+        batch_summary_lines.append(f"  Win rate: {batch.get('win_rate', 0.0):.3f}")
+        batch_summary_lines.append(f"  Average episode length: {batch.get('avg_length', 0.0):.1f}")
+        batch_summary_lines.append("  Reward components:")
+        for key in sorted(batch.get("means", {}).keys()):
+            mean = batch["means"].get(key, 0.0)
+            std = batch["stds"].get(key, 0.0)
+            corr = batch["correlations"].get(key, 0.0)
+            batch_summary_lines.append(f"    - {key}: mean={mean:.3f}, std={std:.3f}, corr_with_win={corr:.3f}")
 
-    # lines.append("")
-    # lines.append("Example game (eliminated – most common cause):")
+    batch_summary_text = "\n".join(batch_summary_lines)
 
+    # -------------------------
+    # Generate direct reward shaping recommendations using LLM
+    # -------------------------
+    prompt = (
+        "You are a Battlesnake reward function advisor. "
+        "Given the following episode-level and batch-level statistics, "
+        "provide concise recommendations for adjusting reward components. "
+        "Highlight components that are likely beneficial, neutral, or harmful, "
+        "and suggest concrete changes in relative weights. "
+        "Do not rewrite the full reward function, only give recommendations.\n\n"
+        "Episode-level summary:\n"
+        f"{episode_summary_text}\n\n"
+        "Batch-level reward statistics:\n"
+        f"{batch_summary_text}\n\n"
+        "Recommendation:"
+    )
 
+    reward_recommendation = prompt_llm(prompt)
 
-    # if elimination_example:
-    #     lines.append(get_last_steps_recommendation(elimination_example))
-    # else:
-    #     lines.append("  None available")
-
-    return "\n".join(lines)
+    return episode_summary_text, reward_recommendation
 
 
 def get_last_steps_recommendation(elimination_example):

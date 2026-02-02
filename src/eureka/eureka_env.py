@@ -5,13 +5,14 @@ from environment.Battlesnake.model.Direction import Direction
 from environment.battlesnake_environment import BattlesnakeEnvironment
 
 class LLMRewardBattleSnake(BattlesnakeEnv):
-    def __init__(self, reward_fn, env: BattlesnakeEnvironment, rl_agent_index=-1, render_mode=None):
-        super().__init__(env, rl_agent_index, render_mode)
+    def __init__(self, reward_fn, env: BattlesnakeEnvironment, rl_agent_index=-1, render_mode=None, enemy_classes={}):
+        super().__init__(env, rl_agent_index, render_mode, enemy_classes)
         self.reward_fn = reward_fn
 
-    def compute_reward(self, agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> float:
+    def compute_reward(self, agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> tuple[float, dict]:
 
         try:
-            return float(self.reward_fn(agent, action, terminated, action_is_safe, ate_food, died, enemy_died))
+            reward, reward_components = self.reward_fn(agent, action, terminated, action_is_safe, ate_food, died, enemy_died)
+            return float(reward), reward_components
         except Exception as e:
-            return -20.0
+            return -20.0, {}
