@@ -9,10 +9,10 @@ class LLMRewardBattleSnake(BattlesnakeEnv):
         super().__init__(env, rl_agent_index, render_mode, enemy_classes)
         self.reward_fn = reward_fn
 
-    def compute_reward(self, agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> tuple[float, dict]:
+    def compute_reward(self, agent: AgentWrapper, action: Direction, terminated: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> tuple[float, dict]:
 
         try:
-            reward, reward_components = self.reward_fn(agent, action, terminated, action_is_safe, ate_food, died, enemy_died)
+            reward, reward_components = self.reward_fn(agent, action, terminated, ate_food, died, enemy_died)
             return float(reward), reward_components
         except Exception as e:
             return -20.0, {}

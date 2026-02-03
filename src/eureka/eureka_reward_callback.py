@@ -6,7 +6,7 @@ from battlesnake.src.eureka.generator import prompt_llm
 
 
 class EurekaRewardCallback(BaseCallback):
-    def __init__(self, window_size=300, eval_every_steps=50000, number_of_envs=32, verbose=0):
+    def __init__(self, window_size=500, eval_every_steps=50000, number_of_envs=32, verbose=0):
         super().__init__(verbose)
         self.window_size = window_size
         self.eval_every_steps = eval_every_steps

@@ -5,7 +5,7 @@ import random
 import numpy as np
 from battlesnake.src.eureka.prompts import get_summarize_last_steps_prompt
 from battlesnake.src.llm.llm_client import LLMClient
-
+from battlesnake.src.eureka.prompts import summarize_stats_prompt
 
 def build_prompt(task_desc: str, feedback: str = None):
     feedback_section = f"Performance feedback from previous attempts:\n{feedback}\n" if feedback else ""
@@ -130,19 +130,7 @@ def summarize_training_stats(episode_stats, eureka_stats, seed=None):
     # -------------------------
     # Generate direct reward shaping recommendations using LLM
     # -------------------------
-    prompt = (
-        "You are a Battlesnake reward function advisor. "
-        "Given the following episode-level and batch-level statistics, "
-        "provide concise recommendations for adjusting reward components. "
-        "Highlight components that are likely beneficial, neutral, or harmful, "
-        "and suggest concrete changes in relative weights. "
-        "Do not rewrite the full reward function, only give recommendations.\n\n"
-        "Episode-level summary:\n"
-        f"{episode_summary_text}\n\n"
-        "Batch-level reward statistics:\n"
-        f"{batch_summary_text}\n\n"
-        "Recommendation:"
-    )
+    prompt = summarize_stats_prompt.format(episode_summary_text=episode_summary_text, batch_summary_text=batch_summary_text)
 
     reward_recommendation = prompt_llm(prompt)
 

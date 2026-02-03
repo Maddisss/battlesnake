@@ -29,6 +29,7 @@ def continue_training(reward_fn, model_path, timesteps, generation, n_eval_episo
     fitness = None
     episode_stats = []
     episode_rewards = []
+    validate_env = None
 
     try:
 
@@ -103,13 +104,13 @@ def eureka_training_loop(generations=4, start_population=16):
     parent_candidates = []
     for generation in range(generations):
         if generation == 0:
-            timesteps = 200000
-        if generation == 1:
             timesteps = 400000
+        if generation == 1:
+            timesteps = 1000000
         if generation == 2:
-            timesteps = 1200000
+            timesteps = 1500000
         if generation == 3:
-            timesteps = 4800000
+            timesteps = 3000000
         # timesteps = base_timesteps * (2 ** generation)
         candidates = []
         # Population generation
@@ -151,6 +152,7 @@ def eureka_training_loop(generations=4, start_population=16):
                 print("invalid reward function")
                 fitness, stats, rewards, eureka_stats = -1, [], [], {}
             else:
+                print(candidate["code"])
                 fitness, stats, rewards, eureka_stats = continue_training(
                     reward_fn=fn,
                     model_path=candidate["model_path"],

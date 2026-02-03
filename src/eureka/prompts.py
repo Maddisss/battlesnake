@@ -4,9 +4,9 @@ import random
 
 
 def get_random_generation_prompt():
-    guidances = [basic_guidance, aggressive_guidance, defensive_guidance, balanced_guidance]
+    guidances = [aggressive_guidance, defensive_guidance, balanced_guidance]
     guidance = random.choice(guidances)
-    prompt = basic_generation_prompt.format(guidance=guidance, code_context=code_context_prompt)
+    prompt = basic_generation_prompt.format(guidance=guidance, code_context=code_context_prompt, reward_design_principles=reward_design_principles)
     return prompt
 
 def get_mutation_prompt(current_generation, generations, code, episode_stats, episode_rewards):
@@ -140,74 +140,112 @@ Strategy Basics:
 
 code_context_prompt = """
 Reward Function:
-- Signature: 
-def compute_reward(agent: AgentWrapper, action: Direction, terminated: bool, action_is_safe: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> tuple[float, dict]:
-You may ONLY use the following inputs:
 
-Scalars / Flags:
-- terminated : bool          → episode ended this step
-- died : bool                → agent died this step
-- enemy_died : bool          → enemy snake died this step
-- ate_food : bool            → agent ate food this step
-- action_is_safe : bool      → chosen action was among safe moves
+Signature:
+def compute_reward(agent: AgentWrapper, action: Direction, terminated: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> tuple[float, dict]:
 
-You have to return excatly a Tuple of:
-- a float of the total reward
-- a dict of each individual reward component (variable name as key) with its respective reward contributed to the total reward (reward value as value) If none set to 0.
+You may ONLY use the inputs listed below.
 
-Agent State (read-only via agent.agent_context):
-- agent.agent_context.you : Snake
-    - you.body : List[Position]       (body[0] is head)
-    - you.health : int                (0–100)
-    - you.get_length() : int
-    - you.get_head(), you.get_tail() : Position
-    - you.get_current_direction() : Direction
+Return:
+- total_reward: float (approx bounded in [-10, +10])
+- components: dict[str, float] (reward_component and its reward contribution. Every used component must appear; unused set to 0)
 
-- agent.agent_context.board : BoardState
-    - board.width, board.height : int
-    - board.turn : int (current step number)
-    - board.food : List[Food(Position)]
-    - board.snakes : List[Snake]      (only visible and alive snakes)
-    - board.is_out_of_bounds(Position) : bool
-    - board.is_occupied_by_snake(Position) : bool
-    - board.is_occupied_by_food(Position) : bool
+==============================
+TERMINATION SIGNALS
+==============================
+- terminated: episode ended this step
+- died: agent died this step
+- enemy_died: at least one enemy died this step
+- ate_food: agent ate food this step
 
-Agent (provides utilities):
-- agent.distance_to_nearest_food() : int
-- agent.distance_to_nearest_enemy_head() : int
-- agent.distance_to_nearest_wall() : int
-- agent.reachable_free_space() : float (range 0-10) openness score of you snake.
-- agent.enemy_reachable_free_space() : float (range 0-10) average openness score of enemies
-- agent.reachable_free_space_from_action(action) : float (range 0-10) (openness score of you snake for current choosen action)
-- agent.get_shortest_path_to_snake_with_smallest_length_advantage(): 
-    tuple[
-        Snake,              the nearest enemy snake instance 
-        int,                the distance of the path to the enemy snake head.
-        list[Direction],    the path to the enemy snake head
-        int                 the length advantage to the enemy snake (my_length - enemy_length)
-    ]
-- agent.length_advantage() : int (negative int for shorter then average, positive for longer)
+==============================
+AGENT STATE (read-only)
+==============================
+agent.agent_context.you:
+- body[0] is head
+- health in [0,100]
+- get_length()
+- get_head(), get_tail()
+- get_current_direction()
 
-Storage Buffer for variables needed to store between steps. Will be reset each episode:
-- agent.storage : dict
+agent.agent_context.board:
+- width, height
+- turn
+- food: list of positions
+- snakes: alive snakes
+- is_out_of_bounds(pos)
+- is_occupied_by_snake(pos)
+- is_occupied_by_food(pos)
 
-Position:
-- Position(x, y) with integer coordinates
-- position.x : int
-- position.y : int
+==============================
+HELPER SIGNALS (cheap heuristics)
+==============================
+- agent.distance_to_nearest_food()     uses rounded Euclidean distance (not Manhattan). Returns board.width + board.height when no head or no food.
+- agent.distance_to_nearest_enemy_head()     uses rounded Euclidean distance to closest enemy head; returns board.width + board.height if none.
+- agent.distance_to_nearest_wall()    returns 0 when already on a wall; computed from x/y min distance to borders.
+- agent.reachable_free_space()    return a float “openness” score from a flood‑fill with exponential decay by distance in range (1-10) (not raw cell count). Can be fractional.
+- agent.enemy_reachable_free_space()    return a float “openness” score from a flood‑fill with exponential decay by distance in range (1-10) (not raw cell count). Can be fractional.
+- agent.reachable_free_space_from_action(action)    evaluates openness in range (1-10) from the next cell after taking action; returns 0 if action is a occupied cell.
+- agent.length_advantage()    is my_length - max_alive_enemy_length. Positive means longer than the largest enemy.
+- agent.get_shortest_path_to_snake_with_smallest_length_advantage()
+    -> (enemy_snake, distance, path, length_advantage)
 
-Direction(Enum):
-- Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT
-- Direction.opposite() : Direction
-- Direction.board_delta() : Tuple[int, int]  (delta x,y for this direction)
+==============================
+STORAGE
+==============================
+- agent.storage : dict is cleared each episode; use it for deltas (e.g., store previous distance/space advantage).
 
-Important Constraints:
-- Do NOT access observations, history, future states, or environment internals.
-- Do NOT mutate any objects or perform I/O.
-- Reward must be a single float bounded approximately in [-10, +10].
-- Computation must be fast (no heavy search or long loops).
+==============================
+CONSTRAINTS
+==============================
+- No history access except via agent.storage
+- No mutation of environment
+- No heavy search / large loops
+- Recommend smooth terms (tanh/clipped deltas) and explicit terminal reward.
+- Reward must be smooth and stable (avoid extreme spikes except death/win)
+- Try to be as computationally efficient as possible (funtion returns should be reused if possible)
 """
 
+reward_design_principles = """
+Reward Design Principles:
+
+1. Structure reward into:
+   - Terminal rewards (win/loss)
+   - Safety & survival shaping
+   - Space control
+   - Food & health management
+   - Combat positioning
+
+2. Terminal rewards:
+   - Large negative for dying
+   - Large positive for surviving final step or enemy elimination
+   - Terminal reward should dominate shaping
+
+3. Dense shaping:
+   - Use small incremental signals (0.05–1.0 range)
+   - Prefer proportional rewards over binary bonuses
+   - Avoid constant per-step rewards unless justified
+
+4. Risk awareness:
+   - Penalize moves reducing reachable_free_space
+   - Penalize moving closer to stronger enemies
+   - Reward space advantage over enemies
+
+5. Phase adaptation:
+   - Low health → prioritize food
+   - Length advantage → enable aggression
+   - Length disadvantage → avoid head-to-head
+
+6. Anti-hacking:
+   - Avoid rewards that can be farmed by oscillation
+   - Avoid encouraging stalling
+   - Avoid rewarding unsafe but lucky behavior
+
+7. Scale discipline:
+   - Typical shaping components in [-2, 2]
+   - Death ~ -8 to -10
+   - Winning ~ +5 to +10
+"""
 
 basic_generation_prompt = """
 You are an expert reinforcement learning engineer designing a reward function for a Battlesnake agent.
@@ -226,12 +264,19 @@ Environment:
 
 {code_context}
 
+{reward_design_principles}
+
 {guidance}
 
 Instructions:
 - Provide only valid Python code implementing compute_reward
 - Optional comments inside the function are allowed for clarity
 - Do not include explanations or text outside the function
+
+Before writing the final reward:
+- Think about how each term affects long-term survival.
+- Ensure no single shaping term can dominate terminal rewards.
+- Ensure rewards do not encourage suicidal attacks.
 """
 
 basic_guidance = """
@@ -244,93 +289,271 @@ Guidance:
 - You may create creative heuristics, as long as they are computable from the inputs
 """
 
+
 defensive_guidance = """
 Guidance:
-- Prioritize survival above all else
-- Penalize collisions, risky head-to-head moves, self-trapping, and dangerous positioning
-- Reward staying in open spaces and safe navigation
-- Reward food collection, but only if it doesn’t compromise safety
-- Intermediate rewards should guide the snake to avoid traps and maintain health
-- Dynamic reward: depend on current positions, distances, and health
+
+Primary objective: survive as long as possible.
+
+TERMINAL:
+- Very strong penalty for death
+- Small bonus for outlasting enemies
+
+SAFETY:
+- Penalize unsafe actions heavily
+- Penalize moves that reduce reachable space
+- Penalize being near stronger enemy heads
+- Penalize being near walls when space is limited
+
+SPACE MAXIMIZATION:
+- Reward high reachable_free_space
+- Reward increasing space over time
+
+FOOD:
+- Reward eating food
+- Reward decreasing food distance when health < 40
+- Avoid risky food near enemies
+
+COMBAT:
+- Only reward aggression when strong length advantage exists
 """
 
 aggressive_guidance = """
 Guidance:
-- Prioritize killing the enemy whenever possible
-- Reward moving towards the enemy and strategic positioning for attacks especially when longer then enemy snakes.
-- Penalize dying and collisions, but slightly less than the benefit of successful aggression
-- Reward food collection to maintain health and to maintain a length, but combat takes priority
-- Penalize self-trapping or poor positioning that reduces combat opportunities
-- Dynamic reward: consider enemy distance, health, and board control
+
+Primary objective: eliminate opponents while maintaining survival.
+
+TERMINAL:
+- Large reward for enemy_died
+- Large penalty for died
+
+COMBAT PRIORITY:
+- If length_advantage > 0:
+    - Reward decreasing distance to weaker enemy head
+    - Reward reducing enemy reachable space
+    - Reward space dominance (my_space - enemy_space)
+- Encourage head-to-head positioning when advantaged
+
+CONTROL:
+- Reward central positioning when dominant
+- Penalize giving enemy escape space
+
+SURVIVAL:
+- Penalize unsafe moves
+- Penalize self-trapping strongly
+- Low health still requires food prioritization
+
+Aggression should scale with length_advantage and space advantage.
+Avoid reckless suicide attacks.
 """
 
 balanced_guidance = """
 Guidance:
-- Balance survival, food collection, and combat
-- Reward staying alive, efficient food gathering, and defeating enemies
-- Penalize self-trapping, collisions, and risky head-to-head moves
-- Encourage open-space movement while taking advantage of combat opportunities
-- Intermediate rewards should guide adaptive behavior depending on health, distance to food, and enemy proximity
-- Dynamic reward: adapt to the current game state to favor long-term survival and strategic play
+
+Primary objective: maximize win probability.
+
+Encourage:
+
+SURVIVAL:
+- Strong penalty for death
+- Penalize unsafe actions
+- Penalize reduction in reachable space
+- Reward maintaining high reachable_free_space
+
+SPACE CONTROL:
+- Reward having more reachable space than enemies
+- Penalize being trapped or near walls when space is low
+
+FOOD STRATEGY:
+- Reward decreasing distance to food when health is low
+- Reward eating food
+- Penalize ignoring food when health is critical
+
+COMBAT:
+- If length_advantage > 0:
+    - Reward decreasing distance to weaker enemy heads
+    - Reward positioning that reduces enemy space
+- If length_advantage < 0:
+    - Penalize proximity to stronger enemy heads
+
+ADAPTIVITY:
+- Health < 30 → prioritize food
+- Length advantage > 1 → increase aggression weight
+- Low reachable space → increase safety penalty weight
+
+Avoid static constant rewards.
+Reward must reflect current board state.
 """
+
 
 
 exploration_based_mutation_prompt = """
-You are given the following reward function for Battlesnake:
+You are evolving a Battlesnake reward function.
 
+==============================
+CURRENT REWARD FUNCTION
+==============================
 {reward_code}
 
-You are also provided with performance statistics from several episodes:
-
-Episode Stats:
+==============================
+TRAINING DIAGNOSIS
+==============================
 {episode_stats}
 
-Average Episode Rewards: {episode_rewards}
+Average episode reward: {episode_rewards}
 
-Your task is to **mutate this reward function** to explore **new strategies and behaviors**. 
-- Keep any parts that seem to correlate with good outcomes.
-- Introduce new ideas to reward behaviors the snake has not consistently exhibited (e.g., alternative food strategies, positioning, risk-taking).
-- You may add new terms, reshape existing rewards, or scale them differently.
-- Avoid removing all elements that worked well; instead, combine exploration with retention.
+==============================
+OBJECTIVE
+==============================
+Introduce controlled strategic exploration while preserving proven useful components.
 
+==============================
+MUTATION RULES
+==============================
+
+1. Preserve components that:
+   - Correlate positively with winning
+   - Support survival and space control
+
+2. Modify components that:
+   - Show weak or negative correlation
+   - Dominate total reward excessively
+
+3. Introduce at most 2 new shaping ideas:
+   - Alternative food urgency scaling
+   - Space advantage comparison
+   - Conditional aggression scaling
+   - Nonlinear penalties (e.g., squared low-space penalty)
+   - Health-based dynamic weighting
+
+4. Do NOT:
+   - Remove terminal rewards
+   - Remove safety penalties
+   - Rewrite everything from scratch
+   - Add more than 1–2 new concepts
+
+5. Maintain smooth reward scaling and stability.
+6. Ensure no single shaping term exceeds terminal rewards.
+
+==============================
+CONSTRAINTS
+==============================
 {code_context}
 
-Instructions:
-- Provide only valid Python code implementing compute_reward
-- Optional comments inside the function are allowed for clarity
-- Do not include explanations or text outside the function
-
-Return **only Python code** for the mutated `compute_reward` function. 
-Make it readable and self-contained.
+Return ONLY valid Python code implementing compute_reward.
 """
 
 exploitation_based_mutation_prompt = """
-You are given the following reward function for Battlesnake:
+You are refining a Battlesnake reward function to exploit successful behaviors.
 
+==============================
+CURRENT REWARD FUNCTION
+==============================
 {reward_code}
 
-You are also provided with performance statistics from several episodes:
-
-Episode Stats:
+==============================
+TRAINING DIAGNOSIS
+==============================
 {episode_stats}
 
-Episode Rewards:
-{episode_rewards}
+Average episode reward: {episode_rewards}
 
-Your task is to **mutate this reward function** to **exploit what worked well**:
-- Identify which parts of the reward function correlate with high fitness.
-- Increase the emphasis or weighting of these effective parts.
-- Avoid introducing radically new behaviors; focus on improving and reinforcing success.
-- Minor refinements, scaling, or reshaping of existing rewards are acceptable.
+==============================
+OBJECTIVE
+==============================
+Strengthen reward components that correlate with higher win rate.
+Reduce or reshape components that harm performance.
 
+==============================
+REFINEMENT RULES
+==============================
+
+1. Increase weights of:
+   - Positive corr_with_win components
+   - Signals tied to survival and space dominance
+
+2. Decrease or rescale:
+   - Negative correlation components
+   - Noisy high-variance components
+
+3. Improve scaling:
+   - Replace flat bonuses with proportional shaping
+   - Make aggression depend more strongly on length_advantage
+   - Make food urgency depend nonlinearly on health
+
+4. Do NOT:
+   - Introduce new unrelated reward concepts
+   - Radically change structure
+   - Remove core survival signals
+
+5. Keep reward smooth and stable.
+
+==============================
+CONSTRAINTS
+==============================
 {code_context}
 
-Instructions:
-- Provide only valid Python code implementing compute_reward
-- Optional comments inside the function are allowed for clarity
-- Do not include explanations or text outside the function
+==============================
+INSTRUCTIONS
+==============================
+Before writing the final function:
+- Briefly reason about what specifically must change.
+- Ensure the modification addresses the diagnosed failure.
+- Ensure reward magnitude remains bounded.
 
-Return **only Python code** for the mutated `compute_reward` function.
-Make it readable and self-contained.
 
+Return ONLY valid Python code implementing compute_reward.
+"""
+
+
+
+summarize_stats_prompt = """
+You are a reinforcement learning reward optimization expert for competitive multi-agent environments.
+
+Your goal is to diagnose weaknesses in the current reward function and propose precise weight-level adjustments.
+
+==============================
+EPISODE-LEVEL PERFORMANCE
+==============================
+{episode_summary_text}
+
+==============================
+BATCH-LEVEL REWARD STATISTICS
+For each reward component:
+- mean: average contribution
+- std: variability
+- corr_with_win: correlation with win rate
+==============================
+{batch_summary_text}
+
+==============================
+ANALYSIS INSTRUCTIONS
+==============================
+
+1. Identify primary bottleneck limiting win rate:
+   - Early deaths?
+   - Starvation?
+   - Losing head-to-head?
+   - Poor space control?
+   - Lack of aggression?
+
+2. For each reward component:
+   - If corr_with_win > 0.2 → likely beneficial
+   - If corr_with_win < -0.2 → likely harmful
+   - If near zero → weak signal
+
+3. Detect pathologies:
+   - High mean but negative correlation → misaligned shaping
+   - High variance but zero correlation → noisy signal
+   - Very large magnitude compared to others → dominance risk
+
+4. Produce:
+   A) Core failure diagnosis (short)
+   B) Reward components to increase (with relative scaling suggestion)
+   C) Reward components to decrease
+   D) Missing strategic signals to introduce
+   E) Risk warnings (reward hacking, oscillation, suicidal aggression)
+
+Be concise and concrete.
+Do NOT rewrite the full reward function.
 """
