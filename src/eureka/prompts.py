@@ -145,18 +145,18 @@ Signature:
 def compute_reward(agent: AgentWrapper, action: Direction, terminated: bool, ate_food: bool, died: bool, enemy_died: bool = False) -> tuple[float, dict]:
 
 You may ONLY use the inputs listed below.
+- agent: AgentWrapper providing read-only access to the agent state and helper signals.
+- action: Direction chosen by the agent this step
+- terminated: episode ended this step
+- ate_food: agent ate food this step
+- died: agent died this step
+- enemy_died: at least one enemy died this step
+
 
 Return:
 - total_reward: float (approx bounded in [-10, +10])
 - components: dict[str, float] (reward_component and its reward contribution. Every used component must appear; unused set to 0)
 
-==============================
-TERMINATION SIGNALS
-==============================
-- terminated: episode ended this step
-- died: agent died this step
-- enemy_died: at least one enemy died this step
-- ate_food: agent ate food this step
 
 ==============================
 AGENT STATE (read-only)
@@ -165,7 +165,8 @@ agent.agent_context.you:
 - body[0] is head
 - health in [0,100]
 - get_length()
-- get_head(), get_tail()
+- get_head() : Position     Get current head position on the board get_head().x, get_head().y (the board is of size 11x11)
+- get_tail()
 - get_current_direction()
 
 agent.agent_context.board:
@@ -178,11 +179,10 @@ agent.agent_context.board:
 - is_occupied_by_food(pos)
 
 ==============================
-HELPER SIGNALS (cheap heuristics)
+HELPER SIGNALS (only call these functions ONCE and REUSE the returned values)
 ==============================
 - agent.distance_to_nearest_food()     uses rounded Euclidean distance (not Manhattan). Returns board.width + board.height when no head or no food.
 - agent.distance_to_nearest_enemy_head()     uses rounded Euclidean distance to closest enemy head; returns board.width + board.height if none.
-- agent.distance_to_nearest_wall()    returns 0 when already on a wall; computed from x/y min distance to borders.
 - agent.reachable_free_space()    return a float “openness” score from a flood‑fill with exponential decay by distance in range (1-10) (not raw cell count). Can be fractional.
 - agent.enemy_reachable_free_space()    return a float “openness” score from a flood‑fill with exponential decay by distance in range (1-10) (not raw cell count). Can be fractional.
 - agent.reachable_free_space_from_action(action)    evaluates openness in range (1-10) from the next cell after taking action; returns 0 if action is a occupied cell.
@@ -203,7 +203,7 @@ CONSTRAINTS
 - No heavy search / large loops
 - Recommend smooth terms (tanh/clipped deltas) and explicit terminal reward.
 - Reward must be smooth and stable (avoid extreme spikes except death/win)
-- Try to be as computationally efficient as possible (funtion returns should be reused if possible)
+- Try to be as computationally efficient as possible (returned values of functions should be reused.)
 """
 
 reward_design_principles = """
@@ -216,35 +216,65 @@ Reward Design Principles:
    - Food & health management
    - Combat positioning
 
-2. Terminal rewards:
-   - Large negative for dying
-   - Large positive for surviving final step or enemy elimination
-   - Terminal reward should dominate shaping
+2. Terminal rewards (must dominate long-term objective):
+   - Large negative for dying (e.g., -8 to -12)
+   - Large positive for winning or eliminating final enemy (e.g., +8 to +12)
+   - Terminal reward magnitude must exceed cumulative shaping over ~10 steps
+   - Surviving longer should never be worse than dying immediately
 
-3. Dense shaping:
+3. Survival drift constraint (anti-collapse rule):
+   - Expected per-step reward while alive should be near zero (roughly in [-0.2, +0.2])
+   - Avoid strong constant negative pressure during normal survival
+   - Do not create reward structures where dying early yields higher return than surviving
+
+4. Dense shaping:
    - Use small incremental signals (0.05–1.0 range)
    - Prefer proportional rewards over binary bonuses
-   - Avoid constant per-step rewards unless justified
+   - Avoid constant per-step rewards or penalties unless justified
 
-4. Risk awareness:
-   - Penalize moves reducing reachable_free_space
+5. Risk awareness:
+   - Encourage maintaining or improving reachable space
+   - Avoid large direct penalties for temporary space reduction
    - Penalize moving closer to stronger enemies
    - Reward space advantage over enemies
 
-5. Phase adaptation:
-   - Low health → prioritize food
-   - Length advantage → enable aggression
-   - Length disadvantage → avoid head-to-head
+6. Phase adaptation:
+   - Low health → gently increase food prioritization (scaled, not binary)
+   - Length advantage → allow mild aggression shaping
+   - Length disadvantage → mildly discourage head-to-head
+   - Phase adjustments should reweight existing signals, not introduce large new penalties
 
-6. Anti-hacking:
+7. Space control:
+   - Reward relative space advantage over enemies
+   - Prefer normalized differences over raw differences
+   - Avoid absolute space rewards that drift negatively as board fills naturally
+
+8. Food & health management:
+    - Reward eating food
+    - When health is low, gently reward decreasing distance to food
+    - Avoid punishing food distance strongly when health is safe
+   
+9. Combat positioning:
+    - Only reward aggression when clear length advantage exists
+    - Scale enemy distance shaping proportionally
+    - Avoid large proximity penalties unless immediate danger exists
+
+10. Anti-hacking:
    - Avoid rewards that can be farmed by oscillation
    - Avoid encouraging stalling
    - Avoid rewarding unsafe but lucky behavior
 
-7. Scale discipline:
-   - Typical shaping components in [-2, 2]
-   - Death ~ -8 to -10
-   - Winning ~ +5 to +10
+11. Magnitude discipline:
+   - Individual shaping terms typically in [-0.5, 0.5]
+   - Avoid stacking more than ~1.0 total negative shaping in a single step
+   - Death penalty should be significantly larger than any single-step shaping signal
+
+12. Stability & consistency constraint:
+   - Shaping rewards must be temporally consistent: similar states should yield similar rewards.
+   - Avoid combining multiple high-sensitivity signals (e.g., space + wall + enemy distance) with large weights.
+   - Reward gradients should be smooth and monotonic with respect to safety and advantage.
+   - Small state changes must not cause large reward sign flips.
+   - The agent should not experience strong negative reward while behaving safely and non-aggressively.
 """
 
 basic_generation_prompt = """

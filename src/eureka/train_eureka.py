@@ -19,10 +19,10 @@ def continue_training(reward_fn, model_path, timesteps, generation, n_eval_episo
     flashlight_mode = True
     env = create_env(reward_fn, flashlight_mode)
 
-    if os.path.exists(model_path):
-        model = load_ppo_model(model_path, env)
-    else:
-        model = get_ppo_model(env, flashlight_mode)
+    # if os.path.exists(model_path):
+    #     model = load_ppo_model(model_path, env)
+    # else:
+    model = get_ppo_model(env, flashlight_mode)
 
     stats_callback = BattlesnakeStatsWriterCallback()
     eureka_reward_callback = EurekaRewardCallback(eval_every_steps=timesteps/8)
