@@ -15,6 +15,9 @@ def get_mutation_prompt(current_generation, generations, code, episode_stats, ep
     else:
         return exploitation_based_mutation_prompt.format(reward_code=code, episode_stats=episode_stats, episode_rewards=episode_rewards, code_context=code_context_prompt)
 
+def get_offspring_prompt(code):
+    prompt = basic_generation_prompt_based_on_existing_function.format(reward_code=code, code_context=code_context_prompt, reward_design_principles=reward_design_principles)
+    return prompt
 
 def get_summarize_last_steps_prompt():
     return sumarize_last_steps_prompt
@@ -308,6 +311,63 @@ Before writing the final reward:
 - Ensure no single shaping term can dominate terminal rewards.
 - Ensure rewards do not encourage suicidal attacks.
 """
+
+basic_generation_prompt_based_on_existing_function = """
+You are an expert reinforcement learning engineer creating an improved offspring from an existing reward function for a Battlesnake agent.
+
+Your task is to refine and strengthen the current reward design — NOT to redesign it from scratch. 
+Preserve the overall structure and intent of the existing reward, but improve scaling, balance, stability, and long-term incentives where needed.
+
+This is the current reward function code:
+{reward_code}
+
+The reward function must remain dense and encourage:
+- Long-term survival
+- Safe navigation
+- Strategic food acquisition
+- Competitive play against multiple enemy snakes
+
+Episode Terminates When:
+- The agent snake dies (collision with wall, itself, or enemy head/body, or out of health), or
+- The game engine reports termination (only one snake remains).
+
+Environment:
+- Grid size: board.width × board.height (typically 11×11).
+- One controlled snake ('me') and multiple enemy snakes.
+- Food spawns on empty cells; eating food restores health and increases length.
+- Snake health decreases each step if no food is eaten.
+- On head-to-head collisions, the longer snake survives; if equal length, both die.
+
+{code_context}
+
+{reward_design_principles}
+
+Improvement Constraints:
+- Keep all existing major reward components unless clearly harmful.
+- Adjust magnitudes, normalization, or conditioning instead of removing structure.
+- Reduce unintended incentives (e.g., reckless aggression, reward hacking, oscillatory behavior).
+- Ensure terminal rewards dominate shaping terms appropriately.
+- Maintain smooth reward gradients where possible.
+- Avoid sparse-only or purely binary reward redesigns.
+- You can introduce new shaping ideas, but they must complement and integrate with the existing design.
+
+Stability Requirements:
+- No single shaping term should outweigh death or win rewards.
+- Avoid incentives that encourage suicidal head-to-head attacks unless strongly favored.
+- Ensure reward scales reasonably with board size and number of snakes.
+- Avoid extremely large constants or unstable growth terms.
+
+Instructions:
+- Provide only valid Python code implementing compute_reward
+- Optional comments inside the function are allowed for clarity
+- Do not include explanations or text outside the function
+
+Before writing the final reward:
+- Review how each term contributes to long-term survival.
+- Check for reward hacking opportunities.
+- Ensure improvements refine the existing logic rather than replace it.
+"""
+
 
 basic_guidance = """
 Guidance:

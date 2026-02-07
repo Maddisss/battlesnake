@@ -24,7 +24,7 @@ def get_ppo_model(env, flashlight_mode=False):
         max_grad_norm=0.5,
 
         verbose=1,
-        tensorboard_log="./runs/eureka_logs_3/",
+        tensorboard_log="./runs/eureka_logs_3_2nd_iter/",
     )
 
     model = create_ppo_model(env=env, flashlight_mode=flashlight_mode, **ppo_params)

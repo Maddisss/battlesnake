@@ -109,6 +109,13 @@ class EurekaDB:
         """, (limit,))
         return cur.fetchall()
 
+    def get_candidate_by_id(self, candidate_id):
+        cur = self.conn.execute("""
+            SELECT * FROM reward_candidates
+            WHERE id = ?
+        """, (candidate_id,))
+        return cur.fetchone()
+
     # ------------------------------
     # Fetch episode stats as Python objects
     # ------------------------------

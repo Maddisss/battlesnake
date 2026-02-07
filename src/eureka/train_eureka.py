@@ -12,7 +12,7 @@ from battlesnake.src.eureka.eureka_db import EurekaDB
 from battlesnake.src.eureka.eureka_reward_callback import EurekaRewardCallback
 from battlesnake.src.eureka.generator import generate_reward_code, load_reward_function, summarize_training_stats
 from battlesnake.src.training.ppo import get_ppo_model, load_ppo_model
-from battlesnake.src.eureka.prompts import get_mutation_prompt, get_random_generation_prompt
+from battlesnake.src.eureka.prompts import get_mutation_prompt, get_offspring_prompt, get_random_generation_prompt
 
 
 def continue_training(reward_fn, model_path, timesteps, generation, n_eval_episodes=50):
@@ -94,7 +94,7 @@ def continue_training(reward_fn, model_path, timesteps, generation, n_eval_episo
     return fitness, episode_stats, episode_rewards, eureka_stats
 
 
-def eureka_training_loop(generations=4, start_population=16):
+def eureka_training_loop(generations=4, start_population=16, next_run=False):
     db = EurekaDB()
     db._ensure_eureka_stats_column()
     population = start_population
@@ -113,13 +113,21 @@ def eureka_training_loop(generations=4, start_population=16):
             timesteps = 3000000
         # timesteps = base_timesteps * (2 ** generation)
         candidates = []
+
+        next_run_ids = [257, 256, 255, 253]
         # Population generation
         for i in range(population):
             parent = parent_candidates[i] if parent_candidates else None
 
             # set_http_proxies()
+            if generation == 0 and next_run:
+                parent = db.get_candidate_by_id(next_run_ids[i % len(next_run_ids)])
+                prompt = get_offspring_prompt(parent['code'])
+                code = generate_reward_code(prompt)
+                summary_text = ''
+                reward_advice = ''
 
-            if parent:
+            elif parent:
                 summary_text, reward_advice = summarize_training_stats(parent['episode_stats'], parent['eureka_stats'])
                 prompt = get_mutation_prompt(generation, generations, parent['code'], summary_text + "\n" + reward_advice, sum(parent['rewards']) / len(parent['rewards']))
                 code = generate_reward_code(
@@ -133,7 +141,7 @@ def eureka_training_loop(generations=4, start_population=16):
 
             # unset_http_proxies()
 
-            model_path = f"models/eureka_candidate_g{generation}_{i}.zip"
+            model_path = f"models/eureka_candidate_2nd_iter_g{generation}_{i}.zip"
 
             candidates.append({
                 "code": code,
